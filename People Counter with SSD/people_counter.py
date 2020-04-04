@@ -215,7 +215,7 @@ while True:
 			y = [c[1] for c in to.centroids]
 			direction = centroid[1] - np.mean(y)
 			to.centroids.append(centroid)
-
+			
 			# check to see if the object has been counted or not
 			if not to.counted:
 				# if the direction is negative (indicating the object
