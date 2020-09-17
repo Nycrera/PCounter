@@ -67,6 +67,10 @@ writer = None
 W = None
 H = None
 
+# initialize the counting line points:
+p1 = None
+p2 = None
+
 # instantiate our centroid tracker, then initialize a list to store
 # each of our dlib correlation trackers, followed by a dictionary to
 # map each unique object ID to a TrackableObject
@@ -77,8 +81,7 @@ trackableObjects = {}
 # initialize the total number of frames processed thus far, along
 # with the total number of objects that have moved either up or down
 totalFrames = 0
-totalDown = 0
-totalUp = 0
+totalEntering = [0, 0]
 
 # start the frames per second throughput estimator
 fps = FPS().start()
@@ -111,6 +114,10 @@ while True:
 		fourcc = cv2.VideoWriter_fourcc(*"MJPG")
 		writer = cv2.VideoWriter(args["output"], fourcc, 30,
 			(W, H), True)
+	
+	# Set counting line:
+	p1 = (0, H//2)
+	p2 = (W, H//2)
 
 	# initialize the current status along with our list of bounding
 	# box rectangles returned by either (1) our object detector or
@@ -188,8 +195,12 @@ while True:
 
 	# draw a horizontal line in the center of the frame -- once an
 	# object crosses this line we will determine whether they were
-	# moving 'up' or 'down'
-	cv2.line(frame, (0, H // 2), (W, H // 2), (0, 255, 255), 2)
+	# moving to area '0' or '1'
+	cv2.putText(frame, "Area 0", (p1[0] + W//5, p1[1] - H//5),
+	 cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 125, 255), 2)
+	cv2.line(frame, p1, p2, (125, 255, 255), 2)
+	cv2.putText(frame, "Area 1", (p2[0] - W//5, p2[1] + H//5),
+	 cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 125, 255), 2)
 
 	# use the centroid tracker to associate the (1) old object
 	# centroids with (2) the newly computed object centroids
@@ -203,35 +214,26 @@ while True:
 
 		# if there is no existing trackable object, create one
 		if to is None:
-			to = TrackableObject(objectID, centroid)
+			area_id = 0 if (p1[1] - p2[1]) / (p2[0] - p1[0]) * (centroid[0] - p1[0]) + H - p2[1] > H - centroid[1] else 1
+			to = TrackableObject(objectID, centroid, area_id)
 
 		# otherwise, there is a trackable object so we can utilize it
 		# to determine direction
 		else:
-			# the difference between the y-coordinate of the *current*
-			# centroid and the mean of *previous* centroids will tell
-			# us in which direction the object is moving (negative for
-			# 'up' and positive for 'down')
-			y = [c[1] for c in to.centroids]
-			direction = centroid[1] - np.mean(y)
-			to.centroids.append(centroid)
-			
 			# check to see if the object has been counted or not
 			if not to.counted:
-				# if the direction is negative (indicating the object
-				# is moving up) AND the centroid is above the center
-				# line, count the object
-				if direction < 0 and centroid[1] < H // 2:
-					totalUp += 1
-					to.counted = True
-
-				# if the direction is positive (indicating the object
-				# is moving down) AND the centroid is below the
-				# center line, count the object
-				elif direction > 0 and centroid[1] > H // 2:
-					totalDown += 1
-					to.counted = True
-
+				# if object changes area count:
+				calculated_id = 0
+				if ((p1[1] - p2[1]) / (p2[0] - p1[0])) * (centroid[0] - p1[0]) + H - p2[1] < H - centroid[1] :
+					calculated_id = 1
+				if to.area_id != calculated_id:
+					if calculated_id == 0:
+						totalEntering[1] += 1
+						to.counted = True
+					else:
+						totalEntering[0] += 1
+						to.counted = True
+						
 		# store the trackable object in our dictionary
 		trackableObjects[objectID] = to
 
@@ -245,9 +247,9 @@ while True:
 	# construct a tuple of information we will be displaying on the
 	# frame
 	info = [
-		("Up", totalUp),
-		("Down", totalDown),
 		("Status", status),
+		("Area 1 Entered:", totalEntering[1]),
+		("Area 0 Entered:", totalEntering[0]),
 	]
 
 	# loop over the info tuples and draw them on our frame
@@ -277,6 +279,9 @@ while True:
 fps.stop()
 print("[INFO] elapsed time: {:.2f}".format(fps.elapsed()))
 print("[INFO] approx. FPS: {:.2f}".format(fps.fps()))
+print("Total Enterings:")
+print("Area 0: ", totalEntering[0])
+print("Area 1: ", totalEntering[1])
 
 # check to see if we need to release the video writer pointer
 if writer is not None:
